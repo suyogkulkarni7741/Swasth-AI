@@ -78,9 +78,11 @@ export const  HomeView= ()=> {
           </button>
 
           {/* User Profile */}
+          <Link href="/sign-in">
           <div className={`w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center cursor-pointer hover:shadow-lg transition-shadow ${isDarkMode ? 'shadow-lg shadow-green-500/20' : ''}`}>
             <i className="ri-user-line text-white text-lg"></i>
           </div>
+        </Link>
         </div>
       </header>
 
