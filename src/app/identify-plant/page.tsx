@@ -1,12 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function IdentifyPlant() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isIdentifying, setIsIdentifying] = useState(false);
+  const [predictions, setPredictions] = useState<Array<{label: string; score: number}>>([]);
+  const modelRef = useRef<any>(null);
+  const tfRef = useRef<any>(null);
 
   const toggleDarkMode = () => {
     setIsDarkMode(!isDarkMode);
@@ -24,11 +27,108 @@ export default function IdentifyPlant() {
   };
 
   const handleIdentify = () => {
-    if (selectedImage) {
-      setIsIdentifying(true);
-      setTimeout(() => {
-        setIsIdentifying(false);
-      }, 3000);
+    if (!selectedImage) return;
+    setIsIdentifying(true);
+    setPredictions([]);
+    runModelOnImage(selectedImage).finally(() => setIsIdentifying(false));
+  };
+
+  // Load TFJS and model (lazy load)
+  const loadModel = async () => {
+    if (modelRef.current) return modelRef.current;
+    const tf = await import('@tensorflow/tfjs');
+    tfRef.current = tf;
+    try {
+      // Try loading as GraphModel (SavedModel format) first
+      const model = await tf.loadGraphModel('/models/simple_mobilenet_classifier/model.json');
+      modelRef.current = model;
+      return model;
+    } catch (err) {
+      console.error('Failed to load model from /models/simple_mobilenet_classifier/model.json', err);
+      throw err;
+    }
+  };
+
+  const runModelOnImage = async (dataUrl: string) => {
+    try {
+      const tf = tfRef.current || (await import('@tensorflow/tfjs'));
+      tfRef.current = tf;
+      const model = await loadModel();
+
+      // Create image element to draw into a canvas
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = dataUrl;
+      await new Promise((res, rej) => {
+        img.onload = () => res(true);
+        img.onerror = (e) => rej(e);
+      });
+
+      // Preprocess image: resize to 224×224 (MobileNet standard)
+      const inputSize = 224;
+      const canvas = document.createElement('canvas');
+      canvas.width = inputSize;
+      canvas.height = inputSize;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not get canvas context');
+      
+      // Fill with white background (matching training data)
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, inputSize, inputSize);
+      
+      // Draw image with aspect ratio maintained (cover mode)
+      const { width: iw, height: ih } = img;
+      const scale = Math.max(inputSize / iw, inputSize / ih);
+      const w = iw * scale;
+      const h = ih * scale;
+      const dx = (inputSize - w) / 2;
+      const dy = (inputSize - h) / 2;
+      ctx.drawImage(img, dx, dy, w, h);
+
+      // Convert to tensor and normalize to [0, 1]
+      // This matches the preprocessing: img_array / 255.0
+      const input = tf.browser.fromPixels(canvas).toFloat();
+      const normalized = input.div(tf.scalar(255)); // Normalize to [0, 1]
+      const batched = normalized.expandDims(0); // Add batch dimension
+
+      // Run prediction (GraphModel)
+      let preds = await model.executeAsync(batched) as any;
+      // If array, get first output
+      if (Array.isArray(preds)) preds = preds[0];
+      
+      let probs = preds;
+      // If shape is [1, N], squeeze batch dimension
+      if (probs.shape && probs.shape.length === 2) {
+        probs = probs.squeeze([0]);
+      }
+      
+      // Get probabilities
+      const probsData = await tf.softmax(probs).data();
+
+      // Try load labels
+      let labels: string[] = [];
+      try {
+        const res = await fetch('/models/simple_mobilenet_classifier/labels.json');
+        if (res.ok) labels = await res.json();
+      } catch (e) {
+        // ignore
+      }
+
+      // Get top 3
+      const items = Array.from(probsData).map((score, idx) => ({ idx, score }));
+      items.sort((a, b) => b.score - a.score);
+      const top = items.slice(0, 3).map((it) => ({
+        label: labels[it.idx] ?? `class_${it.idx}`,
+        score: Math.round(it.score * 10000) / 10000,
+      }));
+
+      setPredictions(top);
+      tf.dispose([input, normalized, batched, preds]);
+      return top;
+    } catch (err) {
+      console.error('Inference error', err);
+      setPredictions([]);
+      return [];
     }
   };
 
@@ -179,6 +279,47 @@ export default function IdentifyPlant() {
                   Analyzing image for plant objects and species identification...
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* Prediction Results */}
+          {predictions.length > 0 && !isIdentifying && (
+            <div className={`rounded-xl p-6 ${isDarkMode ? 'bg-gray-700/30 border border-gray-600/30' : 'bg-green-50/30 border border-green-200/30'} backdrop-blur-sm`}>
+              <div className="flex items-center mb-4">
+                <i className="ri-check-line text-green-600 text-xl mr-3"></i>
+                <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
+                  Detection Results
+                </h3>
+              </div>
+              <div className="space-y-3">
+                {predictions.map((pred, idx) => (
+                  <div key={idx} className="flex items-center justify-between">
+                    <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      {pred.label}
+                    </span>
+                    <div className="flex items-center gap-3 flex-1 ml-4">
+                      <div className={`flex-1 h-2 rounded-full ${isDarkMode ? 'bg-gray-600' : 'bg-gray-200'}`}>
+                        <div
+                          className="h-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full"
+                          style={{ width: `${pred.score * 100}%` }}
+                        ></div>
+                      </div>
+                      <span className={`text-sm font-semibold ${isDarkMode ? 'text-green-400' : 'text-green-600'}`}>
+                        {Math.round(pred.score * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedImage(null);
+                  setPredictions([]);
+                }}
+                className="mt-4 px-6 py-2 text-sm bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-white rounded-full hover:bg-gray-400 dark:hover:bg-gray-500 transition-colors"
+              >
+                Try Another Image
+              </button>
             </div>
           )}
         </div>
