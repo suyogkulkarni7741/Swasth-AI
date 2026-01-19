@@ -165,6 +165,7 @@ class RAGSystem:
 # --- Global Instances ---
 predictor = None
 rag_system = None
+rag_module = None  # Optional external rag utilities (chroma_db_nccn/rag.py)
 
 @app.on_event("startup")
 async def startup():
@@ -173,10 +174,19 @@ async def startup():
     if os.path.exists("efficientnet_b0_final_nb.keras"):
         predictor = MedicinalLeafPredictor("efficientnet_b0_final_nb.keras")
     
-    # Load RAG System
-    # Ensure 'chroma_db_nccn' folder exists in backend/
+    # Load RAG System or external RAG utilities
     if os.path.exists("./chroma_db_nccn"):
-        rag_system = RAGSystem()
+        try:
+            import importlib
+            rag_module = importlib.import_module("chroma_db_nccn.rag")
+            print("✅ External RAG utilities loaded from chroma_db_nccn/rag.py")
+        except Exception as e:
+            print(f"⚠️ Failed to import external RAG module: {e}. Falling back to built-in RAGSystem.")
+            try:
+                rag_system = RAGSystem()
+                print("✅ Built-in RAG System initialized")
+            except Exception as e2:
+                print(f"❌ Failed to initialize built-in RAG System: {e2}")
     else:
         print("⚠️ Warning: chroma_db_nccn folder not found. RAG features will be disabled.")
 
@@ -197,12 +207,30 @@ class RemedyRequest(BaseModel):
 
 @app.post("/api/remedy")
 async def get_remedy(request: RemedyRequest):
+    global rag_system, rag_module
+
+    # Prefer external module (allows rapid updates in chroma_db_nccn folder)
+    if rag_module:
+        try:
+            context = rag_module.get_relevant(request.symptoms)
+            if not context.strip():
+                return {"response": "I couldn't find specific ayurvedic data for this in my database. However, broadly speaking..."}
+            answer = rag_module.generate_answer(request.symptoms, context)
+            return {"response": answer}
+        except Exception as e:
+            print(f"External RAG error: {e}. Falling back to built-in RAG system.")
+
+    # Fallback to built-in RAG system
     if not rag_system:
-        # Fallback if DB missing
         return {"response": "System is offline (Knowledge base not found). Please check backend setup."}
-    
+
     answer = rag_system.get_remedy(request.symptoms)
     return {"response": answer}
+
+
+@app.get("/api/rag/status")
+async def rag_status():
+    return {"loaded": bool(rag_module or rag_system), "source": ("external" if rag_module else ("built-in" if rag_system else "none"))}
 
 if __name__ == "__main__":
     import uvicorn
