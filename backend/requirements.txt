@@ -6,3 +6,9 @@ pillow
 rembg
 matplotlib
 numpy
+# New additions for RAG
+langchain-community
+langchain-huggingface
+chromadb
+openai
+sentence-transformers

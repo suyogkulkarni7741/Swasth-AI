@@ -8,6 +8,12 @@ export default function AyurvedicRemedy() {
   const [symptoms, setSymptoms] = useState('');
   const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // New State for AI Integration
+  const [loading, setLoading] = useState(false);
+  const [aiResponse, setAiResponse] = useState<string | null>(null);
+
+  // Keep these for static fallback/suggestions if needed
   const [showDetailedRemedy, setShowDetailedRemedy] = useState(false);
   const [currentRemedy, setCurrentRemedy] = useState<any>(null);
 
@@ -30,6 +36,7 @@ export default function AyurvedicRemedy() {
     { id: 'anxiety', name: 'Anxiety', icon: 'ri-emotion-unhappy-line' }
   ];
 
+  // Static remedies data (kept for "Common Suggestions" display)
   const remedies = [
     {
       id: 1,
@@ -89,7 +96,7 @@ export default function AyurvedicRemedy() {
       benefits: ['Reduces stress', 'Improves sleep', 'Boosts energy', 'Enhances mental clarity', 'Supports immune system'],
       dosage: 'Once daily in the evening, preferably on empty stomach',
       precautions: ['Avoid during pregnancy', 'May lower blood pressure', 'Consult doctor if on medications'],
-      image: 'https://readdy.ai/api/search-image?query=ashwagandha%20herb%20powder%20in%20wooden%20bowl%2C%20traditional%20ayurvedic%20setting%2C%20green%20herbs%20around%2C%20natural%20lighting%2C%20peaceful%20meditation%20background%2C%20healing%20herbs%20aesthetic&width=400&height=300&seq=ashwa3&orientation=landscape'
+      image: 'https://readdy.ai/api/search-image?query=ashwagandha%20herb%20powder%20in%20wooden%20bowl%2C%20traditional%20ayurvedic%20setting%2C%20green%20herbs%2C%20natural%20lighting%2C%20peaceful%20meditation%20background%2C%20healing%20herbs%20aesthetic&width=400&height=300&seq=ashwa3&orientation=landscape'
     },
     {
       id: 4,
@@ -121,26 +128,48 @@ export default function AyurvedicRemedy() {
     );
   };
 
-  const handleGetRemedies = () => {
-    if (selectedSymptoms.length > 0 || symptoms.trim()) {
-      const matchingRemedies = getRecommendedRemedies();
-      if (matchingRemedies.length > 0) {
-        setCurrentRemedy(matchingRemedies[0]);
-        setShowDetailedRemedy(true);
-        // Scroll to detailed remedy section
-        setTimeout(() => {
-          const remedySection = document.getElementById('detailed-remedy-section');
-          if (remedySection) {
-            remedySection.scrollIntoView({ behavior: 'smooth' });
-          }
-        }, 100);
+  // --- UPDATED: Main Function to Call Python Backend ---
+  const handleGetRemedies = async () => {
+    // Combine text input and tags
+    const query = [symptoms, ...selectedSymptoms].filter(Boolean).join(", ");
+    
+    if (!query) return;
+
+    setLoading(true);
+    setAiResponse(null); // Clear previous results
+    setShowDetailedRemedy(false); // Hide static details if open
+
+    try {
+      // Call the Python API running on port 8000
+      const res = await fetch('http://localhost:8000/api/remedy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symptoms: query }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Server error: ${res.status}`);
       }
+
+      const data = await res.json();
+      setAiResponse(data.response);
+      
+      // Auto-scroll to results
+      setTimeout(() => {
+        document.getElementById('ai-result-section')?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+
+    } catch (error) {
+      console.error("Failed to fetch remedy", error);
+      setAiResponse("Sorry, I couldn't connect to the AI Knowledge Base. Please ensure the Python backend is running.");
+    } finally {
+      setLoading(false);
     }
   };
 
+  // Helper for static list (fallback)
   const getRecommendedRemedies = () => {
     if (selectedSymptoms.length === 0) return [];
-    
     return remedies.filter(remedy => 
       remedy.symptoms.some(symptom => selectedSymptoms.includes(symptom))
     );
@@ -149,11 +178,9 @@ export default function AyurvedicRemedy() {
   const showRemedyDetails = (remedy: any) => {
     setCurrentRemedy(remedy);
     setShowDetailedRemedy(true);
+    setAiResponse(null); // Clear AI response when viewing static detail
     setTimeout(() => {
-      const remedySection = document.getElementById('detailed-remedy-section');
-      if (remedySection) {
-        remedySection.scrollIntoView({ behavior: 'smooth' });
-      }
+      document.getElementById('detailed-remedy-section')?.scrollIntoView({ behavior: 'smooth' });
     }, 100);
   };
 
@@ -234,7 +261,7 @@ export default function AyurvedicRemedy() {
             <textarea
               value={symptoms}
               onChange={(e) => setSymptoms(e.target.value)}
-              placeholder="Describe your symptoms in detail..."
+              placeholder="Describe your symptoms in detail (e.g. 'I have a dry cough and headache since yesterday')..."
               className={`w-full p-4 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500 ${
                 isDarkMode ? 'bg-gray-700/70 text-white placeholder-gray-400 border border-gray-600/50 backdrop-blur-sm' : 'bg-white/70 text-gray-900 placeholder-gray-500 backdrop-blur-sm border border-gray-200/50'
               }`}
@@ -267,24 +294,61 @@ export default function AyurvedicRemedy() {
             </div>
           </div>
 
-          {/* Get Remedies Button */}
+          {/* Get Remedies Button (UPDATED) */}
           <div className="text-center">
             <button 
               onClick={handleGetRemedies}
-              disabled={selectedSymptoms.length === 0 && !symptoms.trim()}
+              disabled={loading || (selectedSymptoms.length === 0 && !symptoms.trim())}
               className={`px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-full font-semibold hover:shadow-lg transition-all whitespace-nowrap ${
-                selectedSymptoms.length === 0 && !symptoms.trim() 
-                  ? 'opacity-50 cursor-not-allowed' 
+                loading || (selectedSymptoms.length === 0 && !symptoms.trim()) 
+                  ? 'opacity-75 cursor-not-allowed' 
                   : 'hover:scale-105'
               }`}
             >
-              <i className="ri-medicine-bottle-line mr-2"></i>
-              Get Personalized Remedies
+              {loading ? (
+                <span className="flex items-center">
+                  <i className="ri-loader-4-line animate-spin mr-2"></i>
+                  Consulting Knowledge Base...
+                </span>
+              ) : (
+                <span className="flex items-center">
+                  <i className="ri-medicine-bottle-line mr-2"></i>
+                  Get Personalized Remedies
+                </span>
+              )}
             </button>
           </div>
         </div>
 
-        {/* Detailed Remedy Section */}
+        {/* --- NEW AI RESULTS SECTION --- */}
+        {aiResponse && (
+          <div id="ai-result-section" className="max-w-4xl mx-auto px-4 mb-16">
+            <div className={`rounded-3xl p-8 ${isDarkMode ? 'bg-gray-800/60 border-gray-700' : 'bg-white/60 border-white/40'} border backdrop-blur-md shadow-xl`}>
+              <div className="flex items-center mb-6">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mr-4 shadow-sm">
+                  <i className="ri-magic-line text-green-600 text-xl"></i>
+                </div>
+                <h3 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
+                  AI Doctor's Recommendation
+                </h3>
+              </div>
+              
+              <div className={`prose max-w-none ${isDarkMode ? 'prose-invert text-gray-300' : 'text-gray-700'}`}>
+                {aiResponse.split('\n').map((line, i) => (
+                   <p key={i} className={`mb-2 leading-relaxed ${line.trim().startsWith('**') || /^\d+\./.test(line.trim()) ? 'font-semibold mt-4 text-lg' : ''}`}>
+                     {line.replaceAll('**', '')}
+                   </p>
+                 ))}
+              </div>
+              
+              <div className="mt-8 pt-4 border-t border-gray-200 dark:border-gray-700 text-xs text-center text-gray-500">
+                Disclaimer: This is AI-generated advice based on ayurvedic texts. Always consult a certified doctor for serious conditions.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Detailed Remedy Section (Static Fallback) */}
         {showDetailedRemedy && currentRemedy && (
           <div id="detailed-remedy-section" className="mb-12">
             <div className={`rounded-3xl p-8 ${isDarkMode ? 'bg-gray-800/40 border border-gray-700/30' : 'bg-white/40 border border-white/20'} backdrop-blur-md shadow-xl`}>
@@ -404,11 +468,11 @@ export default function AyurvedicRemedy() {
           </div>
         )}
 
-        {/* Recommended Remedies Cards */}
-        {!showDetailedRemedy && (selectedSymptoms.length > 0 || symptoms.trim()) && (
+        {/* Recommended Remedies Cards (Suggestions Section) */}
+        {!showDetailedRemedy && !aiResponse && (selectedSymptoms.length > 0 || symptoms.trim()) && (
           <div className="mb-12">
             <h3 className={`text-2xl font-bold mb-6 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
-              Recommended Remedies for Your Symptoms
+              Common Suggestions
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredRemedies.map((remedy) => (
@@ -432,36 +496,6 @@ export default function AyurvedicRemedy() {
                       {remedy.description}
                     </p>
                     
-                    <div className="space-y-3">
-                      <div>
-                        <h5 className={`text-sm font-semibold mb-1 ${isDarkMode ? 'text-green-400' : 'text-green-600'}`}>
-                          Benefits:
-                        </h5>
-                        <div className="flex flex-wrap gap-1">
-                          {remedy.benefits.slice(0, 3).map((benefit: string, index: number) => (
-                            <span
-                              key={index}
-                              className={`px-2 py-1 text-xs rounded-full ${
-                                isDarkMode ? 'bg-green-800/50 text-green-200' : 'bg-green-100 text-green-800'
-                              }`}
-                            >
-                              {benefit}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      
-                      <div>
-                        <h5 className={`text-sm font-semibold mb-1 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                          Ingredients:
-                        </h5>
-                        <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                          {remedy.ingredients.slice(0, 3).join(', ')}
-                          {remedy.ingredients.length > 3 && '...'}
-                        </p>
-                      </div>
-                    </div>
-
                     <button className="w-full mt-4 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-full text-sm font-medium hover:shadow-lg transition-shadow whitespace-nowrap">
                       View Full Recipe
                     </button>
@@ -472,21 +506,15 @@ export default function AyurvedicRemedy() {
 
             {filteredRemedies.length === 0 && selectedSymptoms.length > 0 && (
               <div className="text-center py-16">
-                <div className="w-16 h-16 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <i className="ri-medicine-bottle-line text-white text-2xl"></i>
-                </div>
-                <h4 className={`text-xl font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
-                  No matching remedies found
-                </h4>
-                <p className={`${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Try selecting different symptoms or describe your condition in the text area
+                 <p className={`${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Click "Get Personalized Remedies" above for AI advice.
                 </p>
               </div>
             )}
           </div>
         )}
 
-        {!showDetailedRemedy && selectedSymptoms.length === 0 && !symptoms.trim() && (
+        {!showDetailedRemedy && !aiResponse && selectedSymptoms.length === 0 && !symptoms.trim() && (
           <div className="text-center py-16">
             <div className="w-16 h-16 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
               <i className="ri-stethoscope-line text-white text-2xl"></i>
