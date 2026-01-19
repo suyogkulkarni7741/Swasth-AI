@@ -6,7 +6,7 @@ pillow
 rembg
 matplotlib
 numpy
-# New additions for RAG
+python-dotenv
 langchain-community
 langchain-huggingface
 chromadb
