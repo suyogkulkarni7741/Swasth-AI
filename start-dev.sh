@@ -1,19 +1,34 @@
 #!/bin/bash
 
-# Function to kill all processes when you press Ctrl+C
+
 trap 'kill 0' SIGINT
 
-echo "🚀 Starting SwasthAI Development Environment..."
+echo "🚀 Setting up SwasthAI Development Environment..."
 
-# 1. Start Python Backend in the background
-# (Assumes main.py is in the 'backend' folder as recommended. 
-# If it is in the root, remove 'cd backend &&')
+
+echo "🐍 Installing Python Backend Dependencies..."
+if [ -f "backend/requirements.txt" ]; then
+    pip install -r backend/requirements.txt
+else
+    echo "⚠️  Warning: backend/requirements.txt not found!"
+fi
+
 echo "🐍 Starting Python Backend..."
+
 (cd backend && python main.py) &
 
-# 2. Start Next.js Frontend
+
+echo "📦 Installing Next.js Frontend Dependencies..."
+
+npm install
+
+echo "🌍 App is ready! Access it here:"
+echo "👉 http://localhost:3000"
+echo ""
+
 echo "⚛️  Starting Next.js Frontend..."
+
 npm run dev
 
-# Keep script running to maintain processes
+
 wait
