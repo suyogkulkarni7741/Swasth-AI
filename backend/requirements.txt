@@ -4,6 +4,7 @@ python-multipart
 tensorflow
 pillow
 rembg
+tf-keras
 matplotlib
 numpy
 python-dotenv

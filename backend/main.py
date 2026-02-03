@@ -2,7 +2,7 @@ import os
 import shutil
 import numpy as np
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image, ImageFile
@@ -11,17 +11,12 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.applications.efficientnet import preprocess_input
 from dotenv import load_dotenv
 
-# --- LOAD ENV FROM ROOT DIRECTORY ---
-# This looks for the .env file in the folder one level up (the project root)
+# --- 1. SETUP ENVIRONMENT ---
+# Load .env from project root (Swasth-AI2/.env)
 env_path = Path(__file__).resolve().parent.parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
-# --- RAG Imports ---
-from langchain_community.vectorstores import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
-from openai import OpenAI
-
-# Safety fixes
+# Safety settings
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -36,7 +31,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- 1. EfficientNet Plant Predictor ---
+# --- 2. IMPORT RAG MODULE ---
+# We try to import the rag module from the subfolder
+try:
+    from chroma_db_nccn import rag
+    rag_available = True
+    print("✅ RAG Module loaded successfully")
+except ImportError as e:
+    rag_available = False
+    print(f"⚠️ RAG Module not found or failed to load: {e}")
+    print("Ensure 'chroma_db_nccn' folder exists and has an '__init__.py' file.")
+
+
+# --- 3. VISION MODEL (EfficientNet) ---
 class MedicinalLeafPredictor:
     def __init__(self, model_path):
         print("🔄 Loading EfficientNet model...")
@@ -75,7 +82,7 @@ class MedicinalLeafPredictor:
         np_img = np.array(merged)
         mask = np.any(np_img != [0, 0, 0], axis=-1)
         coords = np.column_stack(np.where(mask))
-        if coords.size == 0: return self.resize_with_padding(merged, (224, 224)) # Fallback
+        if coords.size == 0: return self.resize_with_padding(merged, (224, 224))
         y_min, x_min = coords.min(axis=0)
         y_max, x_max = coords.max(axis=0)
         pad = 10
@@ -97,140 +104,61 @@ class MedicinalLeafPredictor:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
-# --- 2. RAG Symptom Checker Setup ---
-class RAGSystem:
-    def __init__(self):
-        print("🔄 Initializing RAG System...")
-        
-        # Load API Key securely from the loaded environment
-        self.pplx_key = os.getenv("PERPLEXITY_API_KEY")
-        
-        if not self.pplx_key:
-            print("❌ Error: PERPLEXITY_API_KEY not found in .env file")
-            
-        self.embedding_func = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2", 
-            model_kwargs={'device':'cpu'}
-        )
-        self.vector_db = Chroma(
-            persist_directory="./chroma_db_nccn", 
-            embedding_function=self.embedding_func
-        )
-        
-        self.client = OpenAI(
-            api_key=self.pplx_key,
-            base_url="https://api.perplexity.ai"
-        )
-        print("✅ RAG System ready!")
-
-    def get_remedy(self, query: str):
-        if not self.pplx_key:
-             return "Configuration Error: API Key missing on server. Please check .env file."
-
-        try:
-            # 1. Retrieve Context
-            docs = self.vector_db.similarity_search(query, k=3)
-            context = "\n".join([doc.page_content for doc in docs])
-            
-            if not context.strip():
-                return "I couldn't find specific ayurvedic data for this in my database. However, broadly speaking..."
-
-            # 2. Generate Answer
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an expert Ayurvedic doctor. Answer ONLY using the medical context provided below. "
-                        "If the context is insufficient, state that clearly. "
-                        "Use simple language suitable for patients/kids. "
-                        "Format your answer strictly as:\n"
-                        "1. **Remedy & Preparation**\n2. **Dosage**\n3. **Suggestions**\n4. **Severity**\n\n"
-                        f"Medical Context:\n{context}"
-                    )
-                },
-                {"role": "user", "content": query}
-            ]
-            
-            response = self.client.chat.completions.create(
-                model="sonar-pro", 
-                messages=messages,
-                temperature=0.3,
-                max_tokens=1000
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            print(f"RAG Error: {e}")
-            return f"Sorry, I encountered an error consulting the knowledge base: {str(e)}"
-
-# --- Global Instances ---
+# Global predictor instance
 predictor = None
-rag_system = None
-rag_module = None  # Optional external rag utilities (chroma_db_nccn/rag.py)
 
 @app.on_event("startup")
 async def startup():
-    global predictor, rag_system
-    # Load Plant Model
-    if os.path.exists("efficientnet_b0_final_nb.keras"):
-        predictor = MedicinalLeafPredictor("efficientnet_b0_final_nb.keras")
-    
-    # Load RAG System or external RAG utilities
-    if os.path.exists("./chroma_db_nccn"):
+    global predictor
+    model_file = "efficientnet_b0_final_nb.keras"
+    if os.path.exists(model_file):
         try:
-            import importlib
-            rag_module = importlib.import_module("chroma_db_nccn.rag")
-            print("✅ External RAG utilities loaded from chroma_db_nccn/rag.py")
+            predictor = MedicinalLeafPredictor(model_file)
         except Exception as e:
-            print(f"⚠️ Failed to import external RAG module: {e}. Falling back to built-in RAGSystem.")
-            try:
-                rag_system = RAGSystem()
-                print("✅ Built-in RAG System initialized")
-            except Exception as e2:
-                print(f"❌ Failed to initialize built-in RAG System: {e2}")
+            print(f"⚠️ Warning: Failed to load plant model: {e}")
+            print("Plant identification will be unavailable, but RAG will work.")
+            predictor = None
     else:
-        print("⚠️ Warning: chroma_db_nccn folder not found. RAG features will be disabled.")
+        print(f"⚠️ Warning: Model file '{model_file}' not found.")
 
-# --- API Endpoints ---
+# --- API ENDPOINTS ---
 
 @app.post("/api/identify")
 async def identify_plant(file: UploadFile = File(...)):
-    if not predictor: raise HTTPException(503, "Plant model not loaded")
+    if not predictor: 
+        raise HTTPException(status_code=503, detail="Plant model not loaded")
+    
     temp_filename = f"temp_{file.filename}"
     try:
-        with open(temp_filename, "wb") as buffer: shutil.copyfileobj(file.file, buffer)
+        with open(temp_filename, "wb") as buffer: 
+            shutil.copyfileobj(file.file, buffer)
         return predictor.predict(temp_filename)
     finally:
-        if os.path.exists(temp_filename): os.remove(temp_filename)
+        if os.path.exists(temp_filename): 
+            os.remove(temp_filename)
 
 class RemedyRequest(BaseModel):
     symptoms: str
 
 @app.post("/api/remedy")
 async def get_remedy(request: RemedyRequest):
-    global rag_system, rag_module
-
-    # Prefer external module (allows rapid updates in chroma_db_nccn folder)
-    if rag_module:
-        try:
-            context = rag_module.get_relevant(request.symptoms)
-            if not context.strip():
-                return {"response": "I couldn't find specific ayurvedic data for this in my database. However, broadly speaking..."}
-            answer = rag_module.generate_answer(request.symptoms, context)
-            return {"response": answer}
-        except Exception as e:
-            print(f"External RAG error: {e}. Falling back to built-in RAG system.")
-
-    # Fallback to built-in RAG system
-    if not rag_system:
-        return {"response": "System is offline (Knowledge base not found). Please check backend setup."}
-
-    answer = rag_system.get_remedy(request.symptoms)
-    return {"response": answer}
-
-
-@app.get("/api/rag/status")
-async def rag_status():
-    return {"loaded": bool(rag_module or rag_system), "source": ("external" if rag_module else ("built-in" if rag_system else "none"))}
+    if not rag_available:
+        return {"response": "System is offline (RAG module not loaded). Check backend logs."}
+    
+    try:
+        # 1. Get Context from ChromaDB
+        context = rag.get_relevant(request.symptoms)
+        
+        # 2. Generate Answer via Perplexity
+        if not context:
+            return {"response": "I couldn't find specific ayurvedic data for this in my database."}
+            
+        answer = rag.generate_answer(request.symptoms, context)
+        return {"response": answer}
+        
+    except Exception as e:
+        print(f"RAG Error: {e}")
+        return {"response": f"Error consulting knowledge base: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn
