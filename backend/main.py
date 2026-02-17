@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 # --- 1. SETUP ENVIRONMENT ---
 # Load .env from project root (Swasth-AI2/.env)
-env_path = Path(__file__).resolve().parent.parent / '.env'
+env_path = Path(__file__).resolve().parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
 # Safety settings

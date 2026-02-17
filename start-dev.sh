@@ -20,7 +20,7 @@ echo "🐍 Starting Python Backend..."
 
 echo "📦 Installing Next.js Frontend Dependencies..."
 
-npm install
+(cd frontend && npm install)
 
 echo "🌍 App is ready! Access it here:"
 echo "👉 http://localhost:3000"
@@ -28,7 +28,7 @@ echo ""
 
 echo "⚛️  Starting Next.js Frontend..."
 
-npm run dev
+(cd frontend && npm run dev)
 
 
 wait
