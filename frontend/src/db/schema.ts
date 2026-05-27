@@ -61,3 +61,32 @@ export const verification = pgTable("verification", {
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
 });
+
+export const plants = pgTable("plants", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  difficulty: text("difficulty").notNull(),
+  benefits: text("benefits").array().notNull(),
+  image: text("image").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
+export const careInstructions = pgTable("care_instructions", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  plantId: text("plant_id")
+    .notNull()
+    .references(() => plants.id, { onDelete: "cascade" }),
+  stage: text("stage").notNull(), // planting, watering, sunlight, fertilizing, harvesting
+  title: text("title").notNull(),
+  steps: text("steps").array().notNull(),
+  tips: text("tips").array().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});

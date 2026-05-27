@@ -2,19 +2,38 @@
 
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
+import { useTheme } from "next-themes";
+import { signOut, useSession } from "@/lib/auth-client";
+import { toast } from "sonner";
 
 export const  HomeView= ()=> {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { setTheme, theme, resolvedTheme } = useTheme();
+  const { data: session } = useSession();
   const [mounted, setMounted] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => { 
     setMounted(true);
   }, []);
 
   const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
+    setTheme(resolvedTheme === "dark" ? "light" : "dark");
   };
+
+  const handleLogout = async () => {
+    if (!session) return;
+    toast.success("You have logged out.");
+    setTimeout(async () => {
+      await signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            window.location.href = "/sign-in";
+          },
+        },
+      });
+    }, 1000);
+  };
+
+  const isDarkMode = mounted && resolvedTheme === "dark";
 
   return (
     <div className={`min-h-screen relative overflow-hidden ${isDarkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-green-50 to-emerald-100'}`}>
@@ -51,21 +70,6 @@ export const  HomeView= ()=> {
 
         {/* Right Side Navigation */}
         <div className="flex items-center space-x-4">
-          {/* Search Bar */}
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <i className={`ri-search-line text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}></i>
-            </div>
-            <input
-              type="text"
-              placeholder="Search..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className={`pl-10 pr-4 py-2 text-sm rounded-full w-64 focus:outline-none focus:ring-2 focus:ring-green-500 ${
-                isDarkMode ? 'bg-gray-700/70 text-white placeholder-gray-400 border border-gray-600/50 backdrop-blur-sm' : 'bg-white/70 text-gray-900 placeholder-gray-500 backdrop-blur-sm'
-              }`}
-            />
-          </div>
 
           {/* Dark Mode Toggle */}
           <button
@@ -82,7 +86,19 @@ export const  HomeView= ()=> {
           <div className={`w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center cursor-pointer hover:shadow-lg transition-shadow ${isDarkMode ? 'shadow-lg shadow-green-500/20' : ''}`}>
             <i className="ri-user-line text-white text-lg"></i>
           </div>
-        </Link>
+          </Link>
+          <button
+            onClick={handleLogout}
+            disabled={!session}
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors shadow-lg ${
+              session
+                ? 'bg-red-500/80 hover:bg-red-600 cursor-pointer'
+                : 'bg-gray-500/50 cursor-not-allowed opacity-50'
+            }`}
+            title="Logout"
+          >
+            <i className="ri-logout-box-r-line text-white text-lg"></i>
+          </button>
         </div>
       </header>
 
