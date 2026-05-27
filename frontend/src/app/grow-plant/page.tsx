@@ -3,6 +3,9 @@
 import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
 import { getPlants, getCareInstruction } from '@/app/actions/plant';
+import { useTheme } from "next-themes";
+import { signOut, useSession } from "@/lib/auth-client";
+import { toast } from "sonner";
 
 // Define types based on schema
 type Plant = {
@@ -20,7 +23,14 @@ type CareInstruction = {
 };
 
 export default function GrowPlant() {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { setTheme, theme, resolvedTheme } = useTheme();
+  const { data: session } = useSession();
+  const [mounted, setMounted] = useState(false);
+  
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const [selectedPlant, setSelectedPlant] = useState<string | null>(null);
   const [careStage, setCareStage] = useState('planting');
   const [searchQuery, setSearchQuery] = useState('');
@@ -32,8 +42,24 @@ export default function GrowPlant() {
   const [loadingInstruction, setLoadingInstruction] = useState(false);
 
   const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
+    setTheme(resolvedTheme === "dark" ? "light" : "dark");
   };
+
+  const handleLogout = async () => {
+    if (!session) return;
+    toast.success("You have logged out.");
+    setTimeout(async () => {
+      await signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            window.location.href = "/sign-in";
+          },
+        },
+      });
+    }, 1000);
+  };
+
+  const isDarkMode = mounted && resolvedTheme === "dark";
 
   const careStages = [
     { id: 'planting', name: 'Planting', icon: 'ri-seedling-line' },
@@ -165,6 +191,18 @@ export default function GrowPlant() {
           <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center cursor-pointer">
             <i className="ri-user-line text-white text-lg"></i>
           </div>
+          <button
+            onClick={handleLogout}
+            disabled={!session}
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors shadow-lg ${
+              session
+                ? 'bg-red-500/80 hover:bg-red-600 cursor-pointer'
+                : 'bg-gray-500/50 cursor-not-allowed opacity-50'
+            }`}
+            title="Logout"
+          >
+            <i className="ri-logout-box-r-line text-white text-lg"></i>
+          </button>
         </div>
       </header>
 

@@ -1,10 +1,21 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useTheme } from "next-themes";
+import { signOut, useSession } from "@/lib/auth-client";
+import { toast } from "sonner";
 
 export default function AyurvedicRemedy() {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { setTheme, theme, resolvedTheme } = useTheme();
+  const { data: session } = useSession();
+  // Ensure we mount before showing theme-dependent UI to avoid hydration mismatch
+  const [mounted, setMounted] = useState(false);
+  
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const [symptoms, setSymptoms] = useState('');
   const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -18,8 +29,24 @@ export default function AyurvedicRemedy() {
   const [currentRemedy, setCurrentRemedy] = useState<any>(null);
 
   const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
+    setTheme(resolvedTheme === "dark" ? "light" : "dark");
   };
+
+  const handleLogout = async () => {
+    if (!session) return;
+    toast.success("You have logged out.");
+    setTimeout(async () => {
+      await signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            window.location.href = "/sign-in";
+          },
+        },
+      });
+    }, 1000);
+  };
+
+  const isDarkMode = mounted && resolvedTheme === "dark";
 
   const commonSymptoms = [
     { id: 'headache', name: 'Headache', icon: 'ri-brain-line' },
@@ -236,6 +263,18 @@ export default function AyurvedicRemedy() {
           <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center cursor-pointer">
             <i className="ri-user-line text-white text-lg"></i>
           </div>
+          <button
+            onClick={handleLogout}
+            disabled={!session}
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors shadow-lg ${
+              session
+                ? 'bg-red-500/80 hover:bg-red-600 cursor-pointer'
+                : 'bg-gray-500/50 cursor-not-allowed opacity-50'
+            }`}
+            title="Logout"
+          >
+            <i className="ri-logout-box-r-line text-white text-lg"></i>
+          </button>
         </div>
       </header>
 
