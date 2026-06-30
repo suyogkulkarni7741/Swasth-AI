@@ -1,19 +1,44 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useTheme } from "next-themes";
+import { signOut, useSession } from "@/lib/auth-client";
+import { toast } from "sonner";
 
 export default function IdentifyPlant() {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { setTheme, theme, resolvedTheme } = useTheme();
+  const { data: session } = useSession();
+  const [mounted, setMounted] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null); // Track actual file
   const [isIdentifying, setIsIdentifying] = useState(false);
   const [predictions, setPredictions] = useState<Array<{label: string; score: number}>>([]);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
+    setTheme(resolvedTheme === "dark" ? "light" : "dark");
   };
+
+  const handleLogout = async () => {
+    if (!session) return;
+    toast.success("You have logged out.");
+    setTimeout(async () => {
+      await signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            window.location.href = "/sign-in";
+          },
+        },
+      });
+    }, 1000);
+  };
+
+  const isDarkMode = mounted && resolvedTheme === "dark";
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -70,17 +95,64 @@ export default function IdentifyPlant() {
 
   return (
     <div className={`min-h-screen relative overflow-hidden ${isDarkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-green-50 to-emerald-100'}`}>
-      {/* Background & Header (Keep your existing background/header code here) */}
-      
+      {/* Fluid Wave Background */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute inset-0">
+          <div className={`absolute inset-0 ${isDarkMode ? 'opacity-20' : 'opacity-30'}`}>
+            <div className="absolute inset-0 bg-gradient-to-r from-emerald-400/40 via-green-500/60 to-teal-400/40 animate-pulse"></div>
+            <div className="absolute inset-0 bg-gradient-to-br from-green-600/30 via-emerald-700/50 to-teal-600/30 animate-pulse animation-delay-1000"></div>
+            <div className="absolute inset-0 bg-gradient-to-bl from-teal-500/20 via-green-600/40 to-emerald-500/20 animate-pulse animation-delay-2000"></div>
+          </div>
+          
+          <div className="absolute inset-0">
+            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-green-400/10 to-transparent transform rotate-12 animate-pulse"></div>
+            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-emerald-500/15 to-transparent transform -rotate-12 animate-pulse animation-delay-1500"></div>
+            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-teal-400/10 to-transparent transform rotate-6 animate-pulse animation-delay-3000"></div>
+          </div>
+        </div>
+      </div>
+
+      {/* Header */}
       <header className={`relative z-10 flex items-center justify-between px-8 py-6 ${isDarkMode ? 'bg-gray-800/70 border-b border-gray-700/50' : 'bg-white/70'} backdrop-blur-md`}>
-         {/* ... Your existing header code ... */}
-         <div className="flex items-center space-x-3">
-            <Link href="/" className="text-gray-600 hover:text-green-600 transition-colors">
-              <i className="ri-arrow-left-line text-xl"></i>
-            </Link>
-            <h1 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>SwathAI</h1>
-         </div>
-         <button onClick={toggleDarkMode} className="p-2 rounded-full bg-gray-100/70"><i className="ri-contrast-line"></i></button>
+        <div className="flex items-center space-x-4">
+          <Link href="/" className="text-gray-600 hover:text-green-600 transition-colors">
+            <i className="ri-arrow-left-line text-xl"></i>
+          </Link>
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center">
+              <i className="ri-leaf-line text-white text-xl"></i>
+            </div>
+            <h1 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`} style={{ fontFamily: 'Pacifico, serif' }}>
+              SwathAI
+            </h1>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={toggleDarkMode}
+            className={`p-2 rounded-full transition-colors ${
+              isDarkMode ? 'bg-gray-700/70 text-yellow-400 hover:bg-gray-600/70 backdrop-blur-sm' : 'bg-gray-100/70 text-gray-600 hover:bg-gray-200/70 backdrop-blur-sm'
+            }`}
+          >
+            <i className={`text-lg ${isDarkMode ? 'ri-sun-line' : 'ri-moon-line'}`}></i>
+          </button>
+          <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center cursor-pointer">
+            <i className="ri-user-line text-white text-lg"></i>
+          </div>
+          <button
+            onClick={handleLogout}
+            disabled={!session}
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors shadow-lg ${
+              session
+                ? 'bg-red-500/80 hover:bg-red-600 cursor-pointer'
+                : 'bg-gray-500/50 cursor-not-allowed opacity-50'
+            }`}
+            title="Logout"
+          >
+            <i className="ri-logout-box-r-line text-white text-lg"></i>
+          </button>
+        </div>
       </header>
 
       {/* Main Content */}
@@ -153,6 +225,24 @@ export default function IdentifyPlant() {
           )}
         </div>
       </main>
+
+      <style jsx>{`
+        .animation-delay-1000 {
+          animation-delay: 1s;
+        }
+        
+        .animation-delay-1500 {
+          animation-delay: 1.5s;
+        }
+        
+        .animation-delay-2000 {
+          animation-delay: 2s;
+        }
+        
+        .animation-delay-3000 {
+          animation-delay: 3s;
+        }
+      `}</style>
     </div>
   );
 }

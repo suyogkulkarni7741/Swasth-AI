@@ -92,4 +92,4 @@ Key variables include:
 - `DATABASE_URL`: Connection string for the database.
 - `BETTER_AUTH_SECRET` & `BETTER_AUTH_URL`: Authentication settings.
 - `GITHUB_CLIENT_ID` & `SECRET`: GitHub OAuth.
-- `GOOGLE_CLIENT_ID` & `SECRET`: Google OAuth.
+- `GOOGLE_CLIENT_ID` & `SECRET`: Google OAuth..
