@@ -15,7 +15,7 @@ fi
 
 echo "🐍 Starting Python Backend..."
 
-(cd backend && python main.py) &
+(cd backend && /opt/anaconda3/envs/swasth-ai/bin/python main.py) &
 
 
 echo "📦 Installing Next.js Frontend Dependencies..."

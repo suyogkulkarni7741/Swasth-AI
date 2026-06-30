@@ -32,22 +32,20 @@ app.add_middleware(
 )
 
 # --- 2. IMPORT RAG MODULE ---
-# We try to import the rag module from the subfolder
-try:
-    from chroma_db_nccn import rag
-    rag_available = True
-    print("✅ RAG Module loaded successfully")
-except ImportError as e:
-    rag_available = False
-    print(f"⚠️ RAG Module not found or failed to load: {e}")
-    print("Ensure 'chroma_db_nccn' folder exists and has an '__init__.py' file.")
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_chroma import Chroma
+from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
 
+rag_available = False
+rag_chain = None
 
 # --- 3. VISION MODEL (EfficientNet) ---
 class MedicinalLeafPredictor:
     def __init__(self, model_path):
-        print("🔄 Loading EfficientNet model...")
-        self.model = load_model(model_path, compile=False)
+        print("🔄 Loading EfficientNet model architecture...")
         self.class_names = ['Aloevera', 'Amla', 'Amruthaballi', 'Arali', 'Astma_weed', 'Badipala', 'Balloon_Vine', 
                            'Bamboo', 'Beans', 'Betel', 'Bhrami', 'Bringaraja', 'Caricature', 'Castor', 
                            'Catharanthus', 'Chakte', 'Chilly', 'Citron lime (herelikai)', 'Coffee', 
@@ -60,7 +58,28 @@ class MedicinalLeafPredictor:
                            'Pomoegranate', 'Pumpkin', 'Raddish', 'Rose', 'Sampige', 'Sapota', 'Seethaashoka', 
                            'Seethapala', 'Spinach1', 'Tamarind', 'Taro', 'Tecoma', 'Thumbe', 'Tomato', 'Tulsi', 
                            'Turmeric', 'ashoka', 'camphor', 'kamakasturi', 'kepala']
-        print(f"✅ Plant Model loaded!")
+        
+        print("🔄 Initializing background removal session...")
+        import rembg
+        # Using u2netp (lightweight version) for faster background removal
+        self.bg_session = rembg.new_session("u2netp")
+        
+        try:
+            import keras
+            base = keras.applications.EfficientNetB0(include_top=False, weights=None, input_shape=(224,224,3))
+            self.model = keras.Sequential([
+                base,
+                keras.layers.GlobalAveragePooling2D(),
+                keras.layers.BatchNormalization(),
+                keras.layers.Dense(256, activation='relu'),
+                keras.layers.Dense(len(self.class_names), activation='softmax')
+            ])
+            print("🔄 Loading weights from .keras file...")
+            self.model.load_weights(model_path, skip_mismatch=True)
+            print(f"✅ Plant Model loaded successfully!")
+        except Exception as e:
+            print(f"Failed to load model weights manually: {e}")
+            raise e
     
     def resize_with_padding(self, img, target_size=(224, 224)):
         original_w, original_h = img.size
@@ -76,7 +95,12 @@ class MedicinalLeafPredictor:
     def preprocess_image(self, img_path):
         image = Image.open(img_path).convert("RGBA")
         image.load()
-        removed_bg = remove(image)
+        
+        # Optimize: Resize high-res phone photos before background removal to massively speed up rembg
+        # 600x600 is plenty of resolution for a model that ultimately takes 224x224
+        image.thumbnail((600, 600), Image.Resampling.LANCZOS)
+        
+        removed_bg = remove(image, session=self.bg_session)
         black_bg = Image.new("RGBA", removed_bg.size, (0, 0, 0, 255))
         merged = Image.alpha_composite(black_bg, removed_bg).convert("RGB")
         np_img = np.array(merged)
@@ -120,6 +144,45 @@ async def startup():
             predictor = None
     else:
         print(f"⚠️ Warning: Model file '{model_file}' not found.")
+        
+    global rag_available, rag_chain
+    try:
+        print("🔄 Loading RAG Module with Groq...")
+        chroma_path = "../SWASTHAI---AI-modules/rag2/chroma_db_ayurveda"
+        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        vector_store = Chroma(persist_directory=chroma_path, embedding_function=embeddings)
+        retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+        
+        llm = ChatGroq(model_name="llama-3.1-8b-instant", temperature=0.2)
+        
+        system_prompt = (
+        "SYSTEM ROLE: You are an expert Ayurvedic practitioner. Your ONLY source of truth "
+        "is the provided Context. Use it to provide holistic healing advice.\\n\\n"
+        
+        "RESPONSE GUIDELINES:\\n"
+        "1. FORMAT: Use bold headers for the health conditions (e.g., **Fever**, **Common Cold**).\\n"
+        "2. STEPS & REMEDIES: If the context describes a process (making tea, a paste, or a compress), "
+        "list the steps in a clear, numbered list.\\n"
+        "3. QUOTATIONS: For every remedy, you MUST include a verbatim quote as a source. "
+        "Format it as: > *'Direct quote from text'*\\n"
+        "4. SYNONYMS: If the user asks for a 'cold' and you find 'Common Cold' or 'Congestion' in the context, "
+        "use that information. Do not be overly literal with word matching.\\n"
+        "5. FALLBACK: Only if there is absolutely no mention of the condition or related symptoms "
+        "should you say: 'I cannot provide a remedy for this as it is not found in the dataset.'\\n\\n"
+        
+        "CONTEXT:\\n{context}"
+        )
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", "{input}"),
+        ])
+        question_answer_chain = create_stuff_documents_chain(llm, prompt)
+        rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+        rag_available = True
+        print("✅ RAG Module loaded successfully")
+    except Exception as e:
+        print(f"⚠️ RAG Module failed to load: {e}")
+        rag_available = False
 
 # --- API ENDPOINTS ---
 
@@ -146,15 +209,8 @@ async def get_remedy(request: RemedyRequest):
         return {"response": "System is offline (RAG module not loaded). Check backend logs."}
     
     try:
-        # 1. Get Context from ChromaDB
-        context = rag.get_relevant(request.symptoms)
-        
-        # 2. Generate Answer via Perplexity
-        if not context:
-            return {"response": "I couldn't find specific ayurvedic data for this in my database."}
-            
-        answer = rag.generate_answer(request.symptoms, context)
-        return {"response": answer}
+        response = rag_chain.invoke({"input": request.symptoms})
+        return {"response": response["answer"]}
         
     except Exception as e:
         print(f"RAG Error: {e}")
