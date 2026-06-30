@@ -160,25 +160,38 @@ export default function AyurvedicRemedy() {
     // Combine text input and tags
     const query = [symptoms, ...selectedSymptoms].filter(Boolean).join(", ");
     
-    if (!query) return;
+    if (!query) {
+      toast.error("Please select or enter at least one symptom");
+      return;
+    }
 
     setLoading(true);
     setAiResponse(null); // Clear previous results
     setShowDetailedRemedy(false); // Hide static details if open
 
     try {
-      // Call the Python API running on port 8000
+      // Call the Python API running on port 8000 with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
       const res = await fetch('http://localhost:8000/api/remedy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symptoms: query }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!res.ok) {
-        throw new Error(`Server error: ${res.status}`);
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Server error: ${res.status}`);
       }
 
       const data = await res.json();
+      if (!data.response) {
+        throw new Error("No remedy data returned from server");
+      }
       setAiResponse(data.response);
       
       // Auto-scroll to results
@@ -186,9 +199,21 @@ export default function AyurvedicRemedy() {
         document.getElementById('ai-result-section')?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to fetch remedy", error);
-      setAiResponse("Sorry, I couldn't connect to the AI Knowledge Base. Please ensure the Python backend is running.");
+      
+      let errorMsg = "Sorry, I couldn't connect to the AI Knowledge Base. Please ensure the Python backend is running.";
+      
+      if (error.name === 'AbortError') {
+        errorMsg = "Request timed out. The backend might be overloaded. Please try again.";
+      } else if (error instanceof TypeError && error.message.includes('fetch')) {
+        errorMsg = "Cannot connect to backend. Make sure the Python server is running on http://localhost:8000";
+      } else if (error.message) {
+        errorMsg = `Backend error: ${error.message}`;
+      }
+      
+      setAiResponse(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -372,12 +397,78 @@ export default function AyurvedicRemedy() {
                 </h3>
               </div>
               
-              <div className={`prose max-w-none ${isDarkMode ? 'prose-invert text-gray-300' : 'text-gray-700'}`}>
-                {aiResponse.split('\n').map((line, i) => (
-                   <p key={i} className={`mb-2 leading-relaxed ${line.trim().startsWith('**') || /^\d+\./.test(line.trim()) ? 'font-semibold mt-4 text-lg' : ''}`}>
-                     {line.replaceAll('**', '')}
-                   </p>
-                 ))}
+              <div className={`space-y-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                {aiResponse.split('\n').map((line, i) => {
+                  const trimmed = line.trim();
+                  if (!trimmed) return <div key={i} className="h-1" />;
+                  
+                  // Header (## Condition Name)
+                  if (trimmed.startsWith('##')) {
+                    return (
+                      <h3 key={i} className={`text-2xl font-bold mt-6 mb-3 ${isDarkMode ? 'text-green-300' : 'text-green-700'}`}>
+                        {trimmed.replace(/^#+\s*/, '')}
+                      </h3>
+                    );
+                  }
+                  
+                  // Section headers (REMEDY:, PREPARATION:, DOSAGE:, etc.)
+                  if (/^(REMEDY|PREPARATION|DOSAGE|BENEFITS|SOURCE):/i.test(trimmed)) {
+                    const match = trimmed.match(/^([^:]+):\s*(.*)/i);
+                    if (!match) return <p key={i}>{trimmed}</p>;
+                    
+                    const [, label, content] = match;
+                    return (
+                      <div key={i} className="mt-3">
+                        <span className={`font-semibold block ${isDarkMode ? 'text-green-300' : 'text-green-600'}`}>
+                          {label}:
+                        </span>
+                        {content && (
+                          <span className={`ml-0 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            {content}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+                  
+                  // Numbered list items
+                  if (/^\d+\./.test(trimmed)) {
+                    return (
+                      <div key={i} className={`ml-6 py-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                        <span className={`font-medium ${isDarkMode ? 'text-green-300' : 'text-green-600'}`}>
+                          {trimmed.split('.')[0]}.
+                        </span>
+                        <span className="ml-2">{trimmed.substring(trimmed.indexOf('.') + 1).trim()}</span>
+                      </div>
+                    );
+                  }
+                  
+                  // Bullet points
+                  if (trimmed.startsWith('-')) {
+                    return (
+                      <div key={i} className={`ml-6 py-1.5 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                        <span className={`font-medium ${isDarkMode ? 'text-green-300' : 'text-green-600'}`}>•</span>
+                        <span className="ml-2">{trimmed.replace(/^-\s*/, '')}</span>
+                      </div>
+                    );
+                  }
+                  
+                  // Regular text with bold handling
+                  return (
+                    <p key={i} className={`leading-relaxed ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                      {trimmed.split(/(\*\*[^*]+\*\*)/g).map((segment, idx) => {
+                        if (segment.startsWith('**') && segment.endsWith('**')) {
+                          return (
+                            <strong key={idx} className={`font-semibold ${isDarkMode ? 'text-green-300' : 'text-green-600'}`}>
+                              {segment.replace(/\*\*/g, '')}
+                            </strong>
+                          );
+                        }
+                        return <span key={idx}>{segment}</span>;
+                      })}
+                    </p>
+                  );
+                })}
               </div>
               
               <div className="mt-8 pt-4 border-t border-gray-200 dark:border-gray-700 text-xs text-center text-gray-500">

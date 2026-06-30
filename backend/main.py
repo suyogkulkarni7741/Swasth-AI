@@ -148,29 +148,52 @@ async def startup():
     global rag_available, rag_chain
     try:
         print("🔄 Loading RAG Module with Groq...")
-        chroma_path = "../SWASTHAI---AI-modules/rag2/chroma_db_ayurveda"
+        
+        # Use absolute path for reliability
+        backend_dir = Path(__file__).resolve().parent
+        chroma_path = backend_dir.parent / "SWASTHAI---AI-modules" / "rag2" / "chroma_db_ayurveda"
+        
+        if not chroma_path.exists():
+            raise FileNotFoundError(f"ChromaDB not found at {chroma_path}")
+        
+        print(f"📂 Using ChromaDB from: {chroma_path}")
         embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        vector_store = Chroma(persist_directory=chroma_path, embedding_function=embeddings)
+        vector_store = Chroma(persist_directory=str(chroma_path), embedding_function=embeddings)
         retriever = vector_store.as_retriever(search_kwargs={"k": 3})
         
-        llm = ChatGroq(model_name="llama-3.1-8b-instant", temperature=0.2)
+        # Verify Groq API key before creating LLM
+        groq_key = os.getenv("GROQ_API_KEY")
+        if not groq_key:
+            raise ValueError("GROQ_API_KEY environment variable not set")
+        
+        llm = ChatGroq(model_name="llama-3.1-8b-instant", temperature=0.2, api_key=groq_key)
         
         system_prompt = (
-        "SYSTEM ROLE: You are an expert Ayurvedic practitioner. Your ONLY source of truth "
-        "is the provided Context. Use it to provide holistic healing advice.\\n\\n"
+        "You are an expert Ayurvedic practitioner providing clear, well-organized remedies.\n\n"
         
-        "RESPONSE GUIDELINES:\\n"
-        "1. FORMAT: Use bold headers for the health conditions (e.g., **Fever**, **Common Cold**).\\n"
-        "2. STEPS & REMEDIES: If the context describes a process (making tea, a paste, or a compress), "
-        "list the steps in a clear, numbered list.\\n"
-        "3. QUOTATIONS: For every remedy, you MUST include a verbatim quote as a source. "
-        "Format it as: > *'Direct quote from text'*\\n"
-        "4. SYNONYMS: If the user asks for a 'cold' and you find 'Common Cold' or 'Congestion' in the context, "
-        "use that information. Do not be overly literal with word matching.\\n"
-        "5. FALLBACK: Only if there is absolutely no mention of the condition or related symptoms "
-        "should you say: 'I cannot provide a remedy for this as it is not found in the dataset.'\\n\\n"
+        "FORMATTING RULES:\n"
+        "1. Use markdown headers (## Condition Name) for each health condition mentioned.\n"
+        "2. For each remedy, include: PREPARATION (steps), DOSAGE, and BENEFITS.\n"
+        "3. Use numbered lists (1. 2. 3.) for preparation steps.\n"
+        "4. Format source quotes clearly: SOURCE: [exact quote from text]\n"
+        "5. Use simple, clear language that anyone can understand.\n"
+        "6. Separate different conditions or remedies with blank lines.\n\n"
         
-        "CONTEXT:\\n{context}"
+        "OUTPUT STRUCTURE (use this exact format):\n"
+        "## [Condition Name]\n"
+        "REMEDY: [Remedy name]\n"
+        "PREPARATION:\n"
+        "1. [Step 1]\n"
+        "2. [Step 2]\n"
+        "(etc)\n"
+        "DOSAGE: [How often and when to take]\n"
+        "BENEFITS: [What this helps with]\n"
+        "SOURCE: [Direct quote from ayurvedic text]\n\n"
+        
+        "IMPORTANT: Only provide information found in the context below. \n"
+        "If a condition is not mentioned, state: 'This condition is not found in the current knowledge base.'\n\n"
+        
+        "CONTEXT:\n{context}"
         )
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
@@ -181,7 +204,9 @@ async def startup():
         rag_available = True
         print("✅ RAG Module loaded successfully")
     except Exception as e:
-        print(f"⚠️ RAG Module failed to load: {e}")
+        print(f"❌ RAG Module failed to load: {e}")
+        import traceback
+        traceback.print_exc()
         rag_available = False
 
 # --- API ENDPOINTS ---
@@ -206,15 +231,24 @@ class RemedyRequest(BaseModel):
 @app.post("/api/remedy")
 async def get_remedy(request: RemedyRequest):
     if not rag_available:
-        return {"response": "System is offline (RAG module not loaded). Check backend logs."}
+        print("❌ RAG not available - module not loaded during startup")
+        raise HTTPException(status_code=503, detail="RAG module not initialized. Check backend logs.")
+    
+    if not request.symptoms or not request.symptoms.strip():
+        raise HTTPException(status_code=400, detail="Symptoms field cannot be empty.")
     
     try:
+        print(f"🔍 Processing remedy request for: {request.symptoms}")
         response = rag_chain.invoke({"input": request.symptoms})
-        return {"response": response["answer"]}
+        answer = response.get("answer", "No response generated")
+        print(f"✅ Generated remedy response ({len(answer)} chars)")
+        return {"response": answer}
         
     except Exception as e:
-        print(f"RAG Error: {e}")
-        return {"response": f"Error consulting knowledge base: {str(e)}"}
+        print(f"❌ RAG Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to generate remedy: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
